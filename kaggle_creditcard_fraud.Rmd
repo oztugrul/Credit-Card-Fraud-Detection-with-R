@@ -1,0 +1,180 @@
+---
+title: "kaggle credit card fraud prediction"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(caret)
+library(ggplot2)
+library(dplyr)
+library(corrplot)
+library(tidyverse)
+library(pROC)
+library(ROSE)
+library(DMwR2)
+library(xgboost)
+library(PRROC)
+```
+
+# Load the data 
+
+```{r}
+setwd("C:/Users/ozge/Desktop/credit_card_deneme")
+creditcard <- read.csv("creditcard.csv")
+
+```
+
+# Summary of the credit card data
+```{r}
+head(creditcard)
+summary(creditcard)
+slice_sample(creditcard, n=10)
+str(creditcard)
+
+```
+
+
+
+```{r}
+creditcard$Amount <- scale(creditcard$Amount, center = TRUE, scale = TRUE)
+summary(creditcard)
+```
+
+
+```{r}
+#Baseline occurrence of fraud
+
+credit_table <- table(creditcard$Class)
+print(credit_table)
+print(credit_table[2]/(credit_table[1]+credit_table[2]))
+
+creditcard$Class<- factor(make.names(creditcard$Class), labels = c("non_fraud", "fraud"))
+creditcard<-subset(creditcard, select = -c(Time))
+```
+
+
+```{r}
+# Split data
+
+set.seed(77) 
+partition <- caret::createDataPartition(y=creditcard$Class, p=.75, list=FALSE) 
+imbal_train <- creditcard[partition,]
+imbal_test <- creditcard[-partition,]
+print(nrow(imbal_train)/(nrow(imbal_test)+nrow(imbal_train)))
+```
+
+
+
+```{r}
+#Different versions of training set
+set.seed(9560)
+down_train <- downSample(x = imbal_train[, -ncol(imbal_train)],
+                         y = imbal_train$Class)
+table(down_train$Class)  
+
+set.seed(9560)
+up_train <- upSample(x = imbal_train[, -ncol(imbal_train)],
+                     y = imbal_train$Class)                         
+table(up_train$Class) 
+
+set.seed(9560)
+smote_train <- smote(imbal_train,var="Class",over_ratio = 0.5)                         
+table(smote_train$Class) 
+
+
+set.seed(9560)
+rose_train <- ovun.sample(Class ~ ., data  = imbal_train,method="both",p=0.5)$data                         
+table(rose_train$Class)
+
+```
+
+#Train control parameters
+
+```{r}
+ctrl <- trainControl(method = "cv", 
+                     number = 5,
+                     classProbs = TRUE,
+                     summaryFunction = twoClassSummary)
+
+
+```
+
+#Train Model: Exteme Gradient Boosting with L1 and L2 Regularization
+
+```{r}
+train <- train(Class ~., data = smote_train, method = 'xgbLinear',trControl = ctrl)
+train_xgb<-train
+```
+
+
+#Predictions and probabilities
+
+```{r}
+prediction_probability_xgb <- predict(train_xgb, imbal_test, type="prob")
+
+
+prediction_raw_xgb <- predict(train_xgb, imbal_test, type="raw")
+
+```
+
+```{r}
+fraud_probs_xgb <- predict(train_xgb, imbal_test, type="prob")[,2]
+non_fraud_probs_xgb <- predict(train_xgb, imbal_test, type="prob")[,1]
+
+```
+
+#Confusion Matrix
+
+```{r}
+pred_xgb <- factor(ifelse(fraud_probs_xgb >= .5, "fraud", "non_fraud"))
+
+prediction_raw_xgb<-relevel(prediction_raw_xgb,ref=c("fraud"))
+
+imbal_test$Class<-relevel(imbal_test$Class,ref=c("fraud"))
+
+confusionMatrix(data = pred_xgb, reference = factor(imbal_test$Class,levels=c("fraud","non_fraud")))
+
+```
+
+
+```{r}
+dat_xgb<-data.frame(obs=imbal_test$Class,pred=prediction_raw_xgb,prediction_probability_xgb)
+
+twoClassSummary(dat_xgb,lev=levels(imbal_test$Class))
+
+prSummary(dat_xgb, lev=levels(imbal_test$Class))
+```
+
+```{r}
+positive_xgb<-fraud_probs_xgb[imbal_test[,30]==c("fraud")]
+negative_xgb<-fraud_probs_xgb[imbal_test[,30]==c("non_fraud")]
+
+PRC <- pr.curve(positive_xgb, negative_xgb, curve=TRUE)
+plot(PRC)
+
+ROC<-roc.curve(positive_xgb, negative_xgb, curve=TRUE)
+plot(ROC)
+```
+
+# Second way of calculating ROC Curve and PR Curve
+```{r}
+prediction_probability_xgb_scores<-data.frame(event_prob = prediction_probability_xgb$fraud, labels = imbal_test$Class)
+
+roc <- PRROC::roc.curve(scores.class0 = prediction_probability_xgb_scores[prediction_probability_xgb_scores$labels == "fraud", ]$event_prob,scores.class1 = prediction_probability_xgb_scores[prediction_probability_xgb_scores$labels == "non_fraud", ]$event_prob,curve=T)
+plot(roc)
+
+pr<-PRROC::pr.curve(scores.class0 = prediction_probability_xgb_scores[prediction_probability_xgb_scores$labels == "fraud", ]$event_prob, #POSITIVE class 
+                    scores.class1 = prediction_probability_xgb_scores[prediction_probability_xgb_scores$labels == "non_fraud", ]$event_prob, # NEGATIVE class
+                     curve=T)
+plot(pr)
+                    
+paste("Area under the Precision-Recall curve:", round(pr$auc.integral, 7))
+
+paste("Area under the ROC curve:", round(roc$auc, 7))
+```
+
