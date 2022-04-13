@@ -9,5 +9,6 @@ You can try other versions of up sampling and down sampling trainin data given i
 
 Exteme Gradient Boosting with L1 and L2 regularization machine learning model is used for training.
 
-creditcard.csv is downloaded from https://www.kaggle.com/datasets/mlg-ulb/creditcardfraud
+creditcard.csv is downloaded from 
+https://www.kaggle.com/datasets/mlg-ulb/creditcardfraud
 
